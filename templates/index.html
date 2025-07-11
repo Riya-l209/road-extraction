@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Road Extraction U-Net</title>
+</head>
+<body style="text-align: center; font-family: Arial;">
+  <h1>🛣️ Road Extraction Web App</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <input type="file" name="image" required>
+    <input type="submit" value="Predict">
+  </form>
+
+  {% if input_image %}
+    <h2>Input Image:</h2>
+    <img src="{{ url_for('static', filename=input_image) }}" width="300">
+    <h2>Predicted Road Mask:</h2>
+    <img src="{{ url_for('static', filename=output_image) }}" width="300">
+  {% endif %}
+</body>
+</html>
