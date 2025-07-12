@@ -42,7 +42,7 @@ def index():
             with torch.no_grad():
                 output = model(transformed)
                 output = torch.sigmoid(output)
-                mask = (output > 0.5).float().squeeze().numpy()
+                mask = (output > 0.3).float().squeeze().numpy()
 
             # Save output mask
             output_path = os.path.join(UPLOAD_FOLDER, "output.png")
