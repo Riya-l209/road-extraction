@@ -1,55 +1,67 @@
-from flask import Flask, render_template, request
-import os
+import streamlit as st
 import torch
-import cv2
 import numpy as np
-from model import UNet
-from albumentations import Compose, Resize, Normalize
-from albumentations.pytorch import ToTensorV2
-import matplotlib.pyplot as plt
+import cv2
+from PIL import Image
+from torchvision import transforms
+from model import UNet  # Make sure model.py is in same folder
 
-app = Flask(__name__)
-UPLOAD_FOLDER = "static"
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+# =============================
+# CONFIG
+# =============================
+MODEL_PATH = "checkpoints/road_unet_epoch5.pth"
+IMG_SIZE = (128, 128)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load trained model
-model = UNet(in_channels=3, out_channels=1)
-checkpoint = torch.load("checkpoints/road_unet_epoch3.pth", map_location=torch.device('cpu'))
-model.load_state_dict(checkpoint["state_dict"])
-model.eval()
+# =============================
+# LOAD MODEL
+# =============================
+@st.cache_resource
+def load_model():
+    model = UNet(in_channels=3, out_channels=1).to(DEVICE)
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    return model
 
-# Preprocessing
-transform = Compose([
-    Resize(128, 128),  # Change if your training size is different
-    Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-    ToTensorV2()
-])
+model = load_model()
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        file = request.files["image"]
-        if file:
-            input_path = os.path.join(app.config["UPLOAD_FOLDER"], "input.png")
-            file.save(input_path)
+# =============================
+# UI
+# =============================
+st.set_page_config(page_title="Road Extraction App", layout="wide")
+st.title("🛣️ Road Extraction from Satellite Images")
+st.caption("Upload a satellite image to predict the road layout using a trained U-Net model.")
 
-            # Read and preprocess the image
-            image = cv2.imread(input_path)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            transformed = transform(image=image)["image"].unsqueeze(0)
+uploaded_file = st.file_uploader("Upload a .jpg or .png file", type=["jpg", "jpeg", "png"])
 
-            # Predict
-            with torch.no_grad():
-                output = model(transformed)
-                output = torch.sigmoid(output)
-                mask = (output > 0.3).float().squeeze().numpy()
+if uploaded_file is not None:
+    # 📷 Read the uploaded image
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-            # Save output mask
-            output_path = os.path.join(UPLOAD_FOLDER, "output.png")
-            plt.imsave(output_path, mask, cmap="gray")
-            return render_template("index.html", input_image="input.png", output_image="output.png")
+    # 🧼 Preprocess
+    transform = transforms.Compose([
+        transforms.Resize(IMG_SIZE),
+        transforms.ToTensor()
+    ])
+    input_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
-    return render_template("index.html", input_image=None, output_image=None)
+    # 🔮 Predict
+    with torch.no_grad():
+        pred = model(input_tensor)
+        pred = torch.sigmoid(pred)
+        pred = (pred > 0.5).float()
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    # 🎨 Post-process
+    pred_np = pred.squeeze().cpu().numpy() * 255
+    pred_img = Image.fromarray(pred_np.astype(np.uint8))
+
+    # 🖼️ Display prediction
+    st.image(pred_img, caption="🧠 Predicted Road Mask", use_column_width=True)
+    st.success("Prediction complete!")
+
+    # 💾 Save option
+    with open("predicted_mask.jpg", "wb") as f:
+        pred_img.save(f)
+    st.download_button("Download Predicted Mask", data=open("predicted_mask.jpg", "rb"), file_name="road_mask.jpg", mime="image/jpeg")
